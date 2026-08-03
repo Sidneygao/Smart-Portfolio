@@ -1,0 +1,98 @@
+{
+  "AAPL_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "TSM_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "QCOM_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "AMD_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "PLTR_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "ORCL_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "AVGO_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "NXPI_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "MU_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "COHR_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "MSFT_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  },
+  "FN_percentiles": {
+    "data": {
+      "5d": null,
+      "30d": null,
+      "3m": null
+    },
+    "timestamp": "2026-08-03T11:01:24.448992"
+  }
+}
