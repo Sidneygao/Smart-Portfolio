@@ -96,15 +96,10 @@ def get_stock_price_twelvedata(symbol, api_key):
     except Exception as e:
         return None
 
-def get_historical_data(symbol, api_key, period='1month'):
+def get_historical_data(symbol, api_key):
     try:
-        if period == '5d':
-            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=5&apikey={api_key}"
-        elif period == '1month':
-            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=30&apikey={api_key}"
-        elif period == '3month':
-            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=90&apikey={api_key}"
-        
+        # Get 3 months of data and use it for all calculations
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=90&apikey={api_key}"
         response = requests.get(url, timeout=10)
         data = response.json()
         
@@ -114,21 +109,23 @@ def get_historical_data(symbol, api_key, period='1month'):
     except:
         return []
 
-def calculate_percentile(current_price, historical_prices):
+def calculate_percentile(current_price, historical_prices, period='all'):
     if not historical_prices or len(historical_prices) < 2:
-        return None  # Return None if no data available
-    historical_prices.sort()
-    percentile = (sum(1 for p in historical_prices if p <= current_price) / len(historical_prices)) * 100
+        return None
+    
+    # Select subset based on period
+    if period == '5d' and len(historical_prices) >= 5:
+        period_prices = historical_prices[:5]
+    elif period == '1month' and len(historical_prices) >= 30:
+        period_prices = historical_prices[:30]
+    else:
+        period_prices = historical_prices
+    
+    period_prices.sort()
+    percentile = (sum(1 for p in period_prices if p <= current_price) / len(period_prices)) * 100
     return percentile
 
 def get_stock_price_yahoo(symbol):
-
-def calculate_percentile(current_price, historical_prices):
-    if not historical_prices or len(historical_prices) < 2:
-        return None  # Return None if no data available
-    historical_prices.sort()
-    percentile = (sum(1 for p in historical_prices if p <= current_price) / len(historical_prices)) * 100
-    return percentile
     try:
         url = f"https://finance.yahoo.com/quote/{symbol}"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -384,13 +381,11 @@ def main():
         value_percent = (position['market_value'] / total_value * 100) if total_value > 0 else 0
         
         # Calculate real percentiles from historical data
-        p5d_data = get_historical_data(symbol, api_key, '5d')
-        p30d_data = get_historical_data(symbol, api_key, '1month')
-        p3m_data = get_historical_data(symbol, api_key, '3month')
+        historical_data = get_historical_data(symbol, api_key)
         
-        p5d = calculate_percentile(current_price, p5d_data)
-        p30d = calculate_percentile(current_price, p30d_data)
-        p3m = calculate_percentile(current_price, p3m_data)
+        p5d = calculate_percentile(current_price, historical_data, '5d')
+        p30d = calculate_percentile(current_price, historical_data, '1month')
+        p3m = calculate_percentile(current_price, historical_data, 'all')
         
         # Color coding for percentiles
         def color_pct(pct_val):
