@@ -96,7 +96,39 @@ def get_stock_price_twelvedata(symbol, api_key):
     except Exception as e:
         return None
 
+def get_historical_data(symbol, api_key, period='1month'):
+    try:
+        if period == '5d':
+            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=5&apikey={api_key}"
+        elif period == '1month':
+            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=30&apikey={api_key}"
+        elif period == '3month':
+            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=90&apikey={api_key}"
+        
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        if 'values' in data and len(data['values']) > 0:
+            return [float(v['close']) for v in data['values']]
+        return []
+    except:
+        return []
+
+def calculate_percentile(current_price, historical_prices):
+    if not historical_prices or len(historical_prices) < 2:
+        return None  # Return None if no data available
+    historical_prices.sort()
+    percentile = (sum(1 for p in historical_prices if p <= current_price) / len(historical_prices)) * 100
+    return percentile
+
 def get_stock_price_yahoo(symbol):
+
+def calculate_percentile(current_price, historical_prices):
+    if not historical_prices or len(historical_prices) < 2:
+        return None  # Return None if no data available
+    historical_prices.sort()
+    percentile = (sum(1 for p in historical_prices if p <= current_price) / len(historical_prices)) * 100
+    return percentile
     try:
         url = f"https://finance.yahoo.com/quote/{symbol}"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -351,21 +383,27 @@ def main():
         current_price = position['price']
         value_percent = (position['market_value'] / total_value * 100) if total_value > 0 else 0
         
-        import random
-        p5d = f"{random.randint(20, 80)}%"
-        p30d = f"{random.randint(20, 80)}%"
-        p3m = f"{random.randint(20, 80)}%"
+        # Calculate real percentiles from historical data
+        p5d_data = get_historical_data(symbol, api_key, '5d')
+        p30d_data = get_historical_data(symbol, api_key, '1month')
+        p3m_data = get_historical_data(symbol, api_key, '3month')
         
-        def color_pct(pct_str):
-            pct = int(pct_str.rstrip('%'))
-            if pct > 45:
-                return f"<span style='color: red; font-weight: bold;'>{pct_str}</span>"
-            elif pct > 40:
-                return f"<span style='color: orange; font-weight: bold;'>{pct_str}</span>"
-            elif pct < 35:
-                return f"<span style='color: green; font-weight: bold;'>{pct_str}</span>"
+        p5d = calculate_percentile(current_price, p5d_data)
+        p30d = calculate_percentile(current_price, p30d_data)
+        p3m = calculate_percentile(current_price, p3m_data)
+        
+        # Color coding for percentiles
+        def color_pct(pct_val):
+            if pct_val is None:
+                return "N/A"
+            if pct_val > 45:
+                return f"<span style='color: red; font-weight: bold;'>{pct_val:.0f}%</span>"
+            elif pct_val > 40:
+                return f"<span style='color: orange; font-weight: bold;'>{pct_val:.0f}%</span>"
+            elif pct_val < 35:
+                return f"<span style='color: green; font-weight: bold;'>{pct_val:.0f}%</span>"
             else:
-                return pct_str
+                return f"{pct_val:.0f}%"
         
         p5d = color_pct(p5d)
         p30d = color_pct(p30d)
