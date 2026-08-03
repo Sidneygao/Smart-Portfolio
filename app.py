@@ -96,33 +96,65 @@ def get_stock_price_twelvedata(symbol, api_key):
     except Exception as e:
         return None
 
-def get_historical_data(symbol, api_key):
+def get_key_data_points(symbol, api_key):
     try:
-        # Get 3 months of data and use it for all calculations
+        # Get 90 days of data to extract key points
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=90&apikey={api_key}"
         response = requests.get(url, timeout=10)
         data = response.json()
         
         if 'values' in data and len(data['values']) > 0:
-            return [float(v['close']) for v in data['values']]
-        return []
+            prices = [float(v['close']) for v in data['values']]
+            # Extract key points: today (index 0), day 5, day 30, day 90
+            key_points = {}
+            key_points['today'] = prices[0] if len(prices) > 0 else None
+            key_points['day5'] = prices[4] if len(prices) > 4 else None
+            key_points['day30'] = prices[29] if len(prices) > 29 else None
+            key_points['day90'] = prices[89] if len(prices) > 89 else None
+            return key_points
+        return {}
     except:
-        return []
+        return {}
 
-def calculate_percentile(current_price, historical_prices, period='all'):
-    if not historical_prices or len(historical_prices) < 2:
+def calculate_percentile_linear(current_price, key_points, period='all'):
+    print(f"DEBUG calculate_percentile: current_price={current_price}, key_points={key_points}, period={period}")
+    
+    if not key_points or not key_points.get('today'):
+        print(f"DEBUG: Missing key points or today price")
         return None
     
-    # Select subset based on period
-    if period == '5d' and len(historical_prices) >= 5:
-        period_prices = historical_prices[:5]
-    elif period == '1month' and len(historical_prices) >= 30:
-        period_prices = historical_prices[:30]
-    else:
-        period_prices = historical_prices
+    # Simulate price distribution using linear interpolation between key points
+    simulated_prices = []
     
-    period_prices.sort()
-    percentile = (sum(1 for p in period_prices if p <= current_price) / len(period_prices)) * 100
+    if period == '5d' and key_points.get('day5'):
+        # Linear interpolation between day5 and today
+        for i in range(5):
+            weight = i / 4  # 0 to 1
+            price = key_points['day5'] * (1 - weight) + key_points['today'] * weight
+            simulated_prices.append(price)
+    elif period == '1month' and key_points.get('day30'):
+        # Linear interpolation between day30 and today
+        for i in range(30):
+            weight = i / 29  # 0 to 1
+            price = key_points['day30'] * (1 - weight) + key_points['today'] * weight
+            simulated_prices.append(price)
+    elif period == 'all' and key_points.get('day90'):
+        # Linear interpolation between day90 and today
+        for i in range(90):
+            weight = i / 89  # 0 to 1
+            price = key_points['day90'] * (1 - weight) + key_points['today'] * weight
+            simulated_prices.append(price)
+    else:
+        print(f"DEBUG: Missing required key point for period {period}")
+        return None
+    
+    if not simulated_prices:
+        print(f"DEBUG: No simulated prices generated")
+        return None
+    
+    simulated_prices.sort()
+    percentile = (sum(1 for p in simulated_prices if p <= current_price) / len(simulated_prices)) * 100
+    print(f"DEBUG: Calculated percentile: {percentile}")
     return percentile
 
 def get_stock_price_yahoo(symbol):
@@ -380,12 +412,12 @@ def main():
         current_price = position['price']
         value_percent = (position['market_value'] / total_value * 100) if total_value > 0 else 0
         
-        # Calculate real percentiles from historical data
-        historical_data = get_historical_data(symbol, api_key)
+        # Calculate percentiles using linear interpolation from key data points
+        key_points = get_key_data_points(symbol, api_key)
         
-        p5d = calculate_percentile(current_price, historical_data, '5d')
-        p30d = calculate_percentile(current_price, historical_data, '1month')
-        p3m = calculate_percentile(current_price, historical_data, 'all')
+        p5d = calculate_percentile_linear(current_price, key_points, '5d')
+        p30d = calculate_percentile_linear(current_price, key_points, '1month')
+        p3m = calculate_percentile_linear(current_price, key_points, 'all')
         
         # Color coding for percentiles
         def color_pct(pct_val):
