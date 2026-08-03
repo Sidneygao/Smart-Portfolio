@@ -258,28 +258,9 @@ def main():
         st.info("No positions. Add first position in sidebar.")
         return
     
-    # Auto-update prices for symbols not updated in the last hour (silent)
+    # Skip auto-update for fast startup - use manual Force Update button instead
     import time as filetime
-    current_time = filetime.time()
-    symbols_to_update = []
     auto_updated_count = 0
-    
-    for position in portfolio:
-        last_updated = position.get('last_updated', 0)
-        if current_time - last_updated > 3600:  # More than 1 hour
-            symbols_to_update.append(position['symbol'])
-    
-    if symbols_to_update:
-        # Update one by one with proper delays to avoid rate limiting
-        for symbol in symbols_to_update:
-            position = next((p for p in portfolio if p['symbol'] == symbol), None)
-            if position:
-                price = get_stock_price(symbol, api_key)
-                if price:
-                    position['price'] = price
-                    position['last_updated'] = current_time
-                    auto_updated_count += 1
-                time.sleep(8)  # Wait 8 seconds between calls to avoid rate limit
     
     # Calculate from existing prices
     for position in portfolio:
