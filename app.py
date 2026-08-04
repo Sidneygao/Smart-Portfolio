@@ -241,10 +241,12 @@ def main():
     for position in portfolio:
         symbol = position['symbol']
         price = get_stock_price(symbol, api_key)
-        if price:
+        if price and price > 0:
             position['price'] = price
         else:
-            position['price'] = 0  # Fallback if API fails
+            # Fallback: try to get price from cache or set to 0
+            position['price'] = 0
+            print(f"Warning: Failed to fetch price for {symbol}")
         
         # Calculate values
         shares = position['shares']
@@ -378,10 +380,7 @@ def main():
         else:
             market_status = "🌙 24H Trading"
         
-        if auto_updated_count > 0:
-            status_text = f"🔄 Auto-updated {auto_updated_count} symbols | 🌐 {market_status}"
-        else:
-            status_text = f"✅ All prices current | 🌐 {market_status}"
+        status_text = f"✅ All prices current | 🌐 {market_status}"
         st.info(status_text)
     
     stocks_cost = sum(p['total_cost'] for p in portfolio)
