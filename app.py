@@ -188,39 +188,42 @@ def get_stock_price_yahoo(symbol):
         return None
 
 def get_stock_price(symbol, api_key):
-    # Try Twelve Data - quote endpoint first, then basic price endpoint
+    # Try Yahoo Finance first (free, no API key needed)
     try:
-        url = f"https://api.twelvedata.com/quote?symbol={symbol}&apikey={api_key}"
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        
-        # Handle rate limiting
-        if data.get('code') == 429:
-            # Skip rate limited stocks instead of waiting
-            print(f"Rate limited for {symbol}, skipping")
-            return None
-        
-        if 'close' in data:
-            price = float(data['close'])
-            return price
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1d")
+        if not hist.empty:
+            price = hist['Close'].iloc[-1]
+            if price > 0 and price < 10000:
+                return price
     except Exception as e:
-        print(f"DEBUG {symbol} quote error: {e}")
+        pass
     
-    try:
-        url = f"https://api.twelvedata.com/price?symbol={symbol}&apikey={api_key}"
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        
-        # Handle rate limiting
-        if data.get('code') == 429:
-            print(f"Rate limited for {symbol} (price), skipping")
-            return None
-        
-        if 'price' in data:
-            price = float(data['price'])
-            return price
-    except Exception as e:
-        print(f"DEBUG {symbol} price error: {e}")
+    # Fallback to Twelve Data with different symbol formats
+    symbol_variants = [
+        symbol,  # Original
+        f"{symbol}.US",  # US market
+        f"{symbol}.NASDAQ",  # NASDAQ
+        f"{symbol}.NYSE",  # NYSE
+    ]
+    
+    for variant in symbol_variants:
+        try:
+            url = f"https://api.twelvedata.com/quote?symbol={variant}&apikey={api_key}"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
+            # Handle rate limiting
+            if data.get('code') == 429:
+                continue
+            
+            if 'close' in data:
+                price = float(data['close'])
+                if price > 0 and price < 10000:  # Reasonable price range
+                    return price
+        except Exception as e:
+            continue
     
     return None
 
@@ -234,19 +237,41 @@ def main():
     usd_to_cny = exchange_rates['usd_to_cny']
     hkd_to_usd = exchange_rates['hkd_to_usd']
     
-    api_key = "8f411860976c4166a4dc51dafb992dd8"
+    api_key = "8f411860976c4166a4dc51dafb992dd8"  # Your original API key - may need renewal
     
-    # Fetch real-time prices for all stocks
+    # Fetch real-time prices for all stocks with rate limiting
     stocks_usd = 0
+    failed_symbols = []
+    
+    # Load cached prices from previous run
+    try:
+        with open('stock_cache.json', 'r') as f:
+            cache = json.load(f)
+    except:
+        cache = {}
+    
+    current_time = time.time()
+    
     for position in portfolio:
         symbol = position['symbol']
-        price = get_stock_price(symbol, api_key)
-        if price and price > 0:
-            position['price'] = price
+        
+        # Use cached price if available and less than 1 hour old
+        if symbol in cache and current_time - cache[symbol]['timestamp'] < 3600:
+            position['price'] = cache[symbol]['price']
         else:
-            # Fallback: try to get price from cache or set to 0
-            position['price'] = 0
-            print(f"Warning: Failed to fetch price for {symbol}")
+            # Try to fetch new price
+            price = get_stock_price(symbol, api_key)
+            if price and price > 0:
+                position['price'] = price
+                cache[symbol] = {'price': price, 'timestamp': current_time}
+            else:
+                # Use cached price as fallback
+                if symbol in cache:
+                    position['price'] = cache[symbol]['price']
+                    st.warning(f"⚠️ Using cached price for {symbol}")
+                else:
+                    position['price'] = 0
+                    failed_symbols.append(symbol)
         
         # Calculate values
         shares = position['shares']
@@ -257,6 +282,14 @@ def main():
         position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
         
         stocks_usd += position['market_value']
+    
+    # Save updated cache
+    with open('stock_cache.json', 'w') as f:
+        json.dump(cache, f)
+    
+    if failed_symbols:
+        st.error(f"❌ No price data for: {', '.join(failed_symbols)}")
+        st.info("API limit may be reached. Consider upgrading API key or reducing update frequency")
     
     # Sidebar with editing functions (compact)
     with st.sidebar:
