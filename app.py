@@ -236,6 +236,26 @@ def main():
     
     api_key = "8f411860976c4166a4dc51dafb992dd8"
     
+    # Fetch real-time prices for all stocks
+    stocks_usd = 0
+    for position in portfolio:
+        symbol = position['symbol']
+        price = get_stock_price(symbol, api_key)
+        if price:
+            position['price'] = price
+        else:
+            position['price'] = 0  # Fallback if API fails
+        
+        # Calculate values
+        shares = position['shares']
+        avg_cost = position['avg_cost']
+        position['market_value'] = shares * position['price']
+        position['total_cost'] = shares * avg_cost
+        position['profit_loss'] = position['market_value'] - position['total_cost']
+        position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
+        
+        stocks_usd += position['market_value']
+    
     # Sidebar with editing functions (compact)
     with st.sidebar:
         st.header("Edit Stock")
@@ -246,17 +266,13 @@ def main():
             if position:
                 col1, col2 = st.columns(2)
                 with col1:
-                    new_shares = st.number_input("Shares", value=float(position['current_shares']), min_value=0.01, step=0.01, key=f"sidebar_shares_{selected_symbol}")
+                    new_shares = st.number_input("Shares", value=float(position['shares']), min_value=0.01, step=0.01, key=f"sidebar_shares_{selected_symbol}")
                 with col2:
-                    new_cost = st.number_input("Avg Cost", value=float(position['avg_buy_price']), min_value=0.01, step=0.01, key=f"sidebar_cost_{selected_symbol}")
+                    new_cost = st.number_input("Avg Cost", value=float(position['avg_cost']), min_value=0.01, step=0.01, key=f"sidebar_cost_{selected_symbol}")
                 
                 if st.button("Update Stock", key=f"sidebar_update_{selected_symbol}"):
-                    position['current_shares'] = new_shares
-                    position['avg_buy_price'] = new_cost
-                    position['total_cost'] = new_shares * new_cost
-                    position['market_value'] = new_shares * position['price']
-                    position['profit_loss'] = position['market_value'] - position['total_cost']
-                    position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
+                    position['shares'] = new_shares
+                    position['avg_cost'] = new_cost
                     save_portfolio(portfolio)
                     st.success("Updated!")
                     st.rerun()
@@ -293,45 +309,26 @@ def main():
             if new_symbol and new_shares > 0 and new_cost > 0:
                 existing = next((p for p in portfolio if p['symbol'] == new_symbol), None)
                 if existing:
-                    existing['shares_purchased'] += new_shares
-                    existing['current_shares'] += new_shares
-                    existing['total_cost'] += new_shares * new_cost
-                    existing['avg_buy_price'] = existing['total_cost'] / existing['current_shares']
-                    existing['market_value'] = existing['current_shares'] * existing['price']
-                    existing['profit_loss'] = existing['market_value'] - existing['total_cost']
-                    existing['inc_percent'] = (existing['profit_loss'] / existing['total_cost']) * 100 if existing['total_cost'] > 0 else 0
+                    existing['shares'] += new_shares
+                    existing['avg_cost'] = (existing['avg_cost'] * existing['shares'] + new_cost * new_shares) / (existing['shares'] + new_shares)
                     save_portfolio(portfolio)
                     st.success(f"Updated {new_symbol}")
-                    st.rerun()
                 else:
                     new_position = {
-                        'symbol': new_symbol, 'fx': 1, 'price': new_cost, 'currency': 'USD',
-                        'avg_buy_price': new_cost, 'inc_percent': 0, 'shares_purchased': new_shares,
-                        'total_cost': new_shares * new_cost, 'current_shares': new_shares,
-                        'market_value': new_shares * new_cost, 'profit_loss': 0
+                        'symbol': new_symbol,
+                        'shares': new_shares,
+                        'avg_cost': new_cost,
+                        'currency': 'USD',
+                        'fx': 1
                     }
                     portfolio.append(new_position)
                     save_portfolio(portfolio)
                     st.success(f"Added {new_symbol}")
-                    st.rerun()
+                st.rerun()
     
     if not portfolio:
         st.info("No positions. Add first position in sidebar.")
         return
-    
-    # Skip auto-update for fast startup - use manual Force Update button instead
-    import time as filetime
-    auto_updated_count = 0
-    
-    # Calculate from existing prices
-    for position in portfolio:
-        position['market_value'] = position['current_shares'] * position['price']
-        position['profit_loss'] = position['market_value'] - position['total_cost']
-        position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
-    
-    # Save portfolio with timestamps
-    save_portfolio(portfolio)
-    st.success("Real-time prices updated!")
     
     # Manual price update button and market status - combined single row
     col1, col2 = st.columns([1, 4])
@@ -352,7 +349,8 @@ def main():
             
             if updated_count > 0:
                 for position in portfolio:
-                    position['market_value'] = position['current_shares'] * position['price']
+                    position['market_value'] = position['shares'] * position['price']
+                    position['total_cost'] = position['shares'] * position['avg_cost']
                     position['profit_loss'] = position['market_value'] - position['total_cost']
                     position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
                 
@@ -386,7 +384,6 @@ def main():
             status_text = f"✅ All prices current | 🌐 {market_status}"
         st.info(status_text)
     
-    stocks_usd = sum(p['market_value'] for p in portfolio)
     stocks_cost = sum(p['total_cost'] for p in portfolio)
     stocks_profit = stocks_usd - stocks_cost
     
@@ -412,12 +409,10 @@ def main():
         current_price = position['price']
         value_percent = (position['market_value'] / total_value * 100) if total_value > 0 else 0
         
-        # Calculate percentiles using linear interpolation from key data points
-        key_points = get_key_data_points(symbol, api_key)
-        
-        p5d = calculate_percentile_linear(current_price, key_points, '5d')
-        p30d = calculate_percentile_linear(current_price, key_points, '1month')
-        p3m = calculate_percentile_linear(current_price, key_points, 'all')
+        # Skip percentile calculation for now to speed up startup
+        p5d = None
+        p30d = None
+        p3m = None
         
         # Color coding for percentiles
         def color_pct(pct_val):
@@ -438,8 +433,8 @@ def main():
         
         portfolio_data.append({
             'Symbol': symbol,
-            'Shares': int(position['current_shares']),
-            'Cost': f"${position['avg_buy_price']:.2f}",
+            'Shares': int(position['shares']),
+            'Cost': f"${position['avg_cost']:.2f}",
             'Price': f"${current_price:.2f}",
             '% of Total': f"{value_percent:.1f}%",
             'Ret': f"{position['inc_percent']:.1f}%",
