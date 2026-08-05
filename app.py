@@ -37,6 +37,14 @@ st.markdown("""
         margin-bottom: 0.03rem !important;
         font-size: 0.85rem !important;
     }
+    .stAppHeader { height: 2rem; }
+    .stMainBlockContainer { padding-top: 2.2rem !important; padding-bottom: 1rem !important; }
+    section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] { padding-top: 0.4rem !important; }
+    section[data-testid="stSidebar"] div[data-testid="stSidebarHeader"] { padding: 0.2rem 0.6rem !important; height: auto !important; }
+    .stSidebar hr { margin: 0.25rem 0 !important; }
+    .stAlert { padding: 0.25rem 0.6rem !important; }
+    .stAlert p { font-size: 13px !important; margin: 0 !important; }
+    .stMain h3 { font-size: 1.05rem !important; margin: 0.35rem 0 0.15rem !important; padding: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
