@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
 import json
+import os
 import requests
 import time
-import re
+import yfinance as yf
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 st.set_page_config(page_title="Smart Portfolio", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
@@ -38,8 +40,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-PORTFOLIO_FILE = "portfolio.json"
-CASH_FILE = "client_cash.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PORTFOLIO_FILE = os.path.join(BASE_DIR, "portfolio.json")
+CASH_FILE = os.path.join(BASE_DIR, "client_cash.json")
+CACHE_FILE = os.path.join(BASE_DIR, "stock_cache.json")
+CACHE_TTL_SECONDS = 3600
+TWELVE_DATA_API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
+PERIOD_TRADING_DAYS = {"5d": 5, "1m": 21, "3m": 63}
 
 def load_portfolio():
     try:
@@ -49,8 +56,19 @@ def load_portfolio():
         return []
 
 def save_portfolio(portfolio):
+    """Persist only the essential fields; prices and derived values are always re-fetched."""
+    essentials = [
+        {
+            'symbol': p['symbol'],
+            'shares': p['shares'],
+            'avg_cost': p['avg_cost'],
+            'currency': p.get('currency', 'USD'),
+            'fx': p.get('fx', 1),
+        }
+        for p in portfolio
+    ]
     with open(PORTFOLIO_FILE, 'w') as f:
-        json.dump(portfolio, f, indent=2)
+        json.dump(essentials, f, indent=2)
 
 def load_client_cash():
     try:
@@ -71,161 +89,121 @@ def get_exchange_rates():
     except:
         return {'usd_to_cny': 7.2, 'usd_to_hkd': 7.8, 'hkd_to_usd': 0.128}
 
-def get_stock_price_twelvedata(symbol, api_key):
+def get_market_data(symbols):
+    """Fetch latest prices and 3-month close history for all symbols in one batched request."""
+    data = {}
+    if not symbols:
+        return data
     try:
-        # Try quote endpoint first - it has more data
-        url = f"https://api.twelvedata.com/quote?symbol={symbol}&apikey={api_key}"
-        response = requests.get(url)
-        data = response.json()
-        
-        if 'close' in data:
-            price = float(data['close'])
-            return price
-        
-        # Fallback to time_series
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=1&apikey={api_key}"
-        response = requests.get(url)
-        data = response.json()
-        
-        if 'values' in data and len(data['values']) > 0:
-            latest = data['values'][0]
-            price = float(latest['close'])
-            return price
-            
-        return None
-    except Exception as e:
-        return None
+        raw = yf.download(symbols, period="3mo", interval="1d", group_by="ticker",
+                          threads=True, progress=False, auto_adjust=False)
+    except Exception:
+        raw = None
 
-def get_key_data_points(symbol, api_key):
-    try:
-        # Get 90 days of data to extract key points
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=90&apikey={api_key}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        
-        if 'values' in data and len(data['values']) > 0:
-            prices = [float(v['close']) for v in data['values']]
-            # Extract key points: today (index 0), day 5, day 30, day 90
-            key_points = {}
-            key_points['today'] = prices[0] if len(prices) > 0 else None
-            key_points['day5'] = prices[4] if len(prices) > 4 else None
-            key_points['day30'] = prices[29] if len(prices) > 29 else None
-            key_points['day90'] = prices[89] if len(prices) > 89 else None
-            return key_points
-        return {}
-    except:
-        return {}
+    for symbol in symbols:
+        closes = []
+        try:
+            if raw is not None and len(symbols) > 1:
+                closes = raw[symbol]["Close"].dropna().tolist()
+            elif raw is not None:
+                closes = raw["Close"].dropna().tolist()
+        except (KeyError, TypeError):
+            closes = []
+        if closes:
+            data[symbol] = {"price": closes[-1], "history": closes}
+    return data
 
-def calculate_percentile_linear(current_price, key_points, period='all'):
-    print(f"DEBUG calculate_percentile: current_price={current_price}, key_points={key_points}, period={period}")
-    
-    if not key_points or not key_points.get('today'):
-        print(f"DEBUG: Missing key points or today price")
+def get_price_twelvedata(symbol, api_key):
+    if not api_key:
         return None
-    
-    # Simulate price distribution using linear interpolation between key points
-    simulated_prices = []
-    
-    if period == '5d' and key_points.get('day5'):
-        # Linear interpolation between day5 and today
-        for i in range(5):
-            weight = i / 4  # 0 to 1
-            price = key_points['day5'] * (1 - weight) + key_points['today'] * weight
-            simulated_prices.append(price)
-    elif period == '1month' and key_points.get('day30'):
-        # Linear interpolation between day30 and today
-        for i in range(30):
-            weight = i / 29  # 0 to 1
-            price = key_points['day30'] * (1 - weight) + key_points['today'] * weight
-            simulated_prices.append(price)
-    elif period == 'all' and key_points.get('day90'):
-        # Linear interpolation between day90 and today
-        for i in range(90):
-            weight = i / 89  # 0 to 1
-            price = key_points['day90'] * (1 - weight) + key_points['today'] * weight
-            simulated_prices.append(price)
-    else:
-        print(f"DEBUG: Missing required key point for period {period}")
-        return None
-    
-    if not simulated_prices:
-        print(f"DEBUG: No simulated prices generated")
-        return None
-    
-    simulated_prices.sort()
-    percentile = (sum(1 for p in simulated_prices if p <= current_price) / len(simulated_prices)) * 100
-    print(f"DEBUG: Calculated percentile: {percentile}")
-    return percentile
-
-def get_stock_price_yahoo(symbol):
-    try:
-        url = f"https://finance.yahoo.com/quote/{symbol}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code == 200:
-            price_match = re.search(r'"regularMarketPrice":{"raw":([0-9.]+)', response.text)
-            if price_match:
-                price = float(price_match.group(1))
-                if price > 0 and price < 5000:
-                    return price
-        return None
-    except:
-        return None
-    try:
-        url = f"https://finance.yahoo.com/quote/{symbol}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code == 200:
-            price_match = re.search(r'"regularMarketPrice":{"raw":([0-9.]+)', response.text)
-            if price_match:
-                price = float(price_match.group(1))
-                if price > 0 and price < 5000:
-                    return price
-        return None
-    except:
-        return None
-
-def get_stock_price(symbol, api_key):
-    # Try Yahoo Finance first (free, no API key needed)
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1d")
-        if not hist.empty:
-            price = hist['Close'].iloc[-1]
-            if price > 0 and price < 10000:
-                return price
-    except Exception as e:
-        pass
-    
-    # Fallback to Twelve Data with different symbol formats
-    symbol_variants = [
-        symbol,  # Original
-        f"{symbol}.US",  # US market
-        f"{symbol}.NASDAQ",  # NASDAQ
-        f"{symbol}.NYSE",  # NYSE
-    ]
-    
-    for variant in symbol_variants:
+    for variant in (symbol, f"{symbol}.US", f"{symbol}.NASDAQ", f"{symbol}.NYSE"):
         try:
             url = f"https://api.twelvedata.com/quote?symbol={variant}&apikey={api_key}"
-            response = requests.get(url, timeout=5)
-            data = response.json()
-            
-            # Handle rate limiting
-            if data.get('code') == 429:
+            payload = requests.get(url, timeout=5).json()
+            if payload.get("code") == 429:
                 continue
-            
-            if 'close' in data:
-                price = float(data['close'])
-                if price > 0 and price < 10000:  # Reasonable price range
+            if "close" in payload:
+                price = float(payload["close"])
+                if 0 < price < 10000:
                     return price
-        except Exception as e:
+        except (requests.RequestException, ValueError):
             continue
-    
     return None
+
+def calculate_percentile(current_price, history, period):
+    """Rank of the current price within the closes of the given trailing period."""
+    window = PERIOD_TRADING_DAYS.get(period)
+    if not window or not history:
+        return None
+    prices = history[-window:]
+    if len(prices) < 2:
+        return None
+    return sum(1 for p in prices if p <= current_price) / len(prices) * 100
+
+def load_cache():
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def save_cache(cache):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f)
+
+def get_market_status():
+    now = datetime.now(ZoneInfo("America/New_York"))
+    if now.weekday() >= 5:
+        return "🌙 Market Closed"
+    minutes = now.hour * 60 + now.minute
+    if 4 * 60 <= minutes < 9 * 60 + 30:
+        return "🌅 Pre-Market"
+    if 9 * 60 + 30 <= minutes < 16 * 60:
+        return "🌞 Regular Hours"
+    if 16 * 60 <= minutes < 20 * 60:
+        return "🌆 After-Hours"
+    return "🌙 Market Closed"
+
+def populate_market_data(portfolio, force=False):
+    """Fill each position with a price, close history and derived values.
+
+    Returns the symbols with no data at all and those served from an expired cache.
+    """
+    cache = load_cache()
+    now = time.time()
+    outdated = [
+        p['symbol'] for p in portfolio
+        if force or now - cache.get(p['symbol'], {}).get('timestamp', 0) >= CACHE_TTL_SECONDS
+    ]
+    fetched = get_market_data(outdated)
+
+    for symbol in outdated:
+        entry = fetched.get(symbol)
+        if entry is None:
+            price = get_price_twelvedata(symbol, TWELVE_DATA_API_KEY)
+            if price is None:
+                continue
+            entry = {'price': price, 'history': cache.get(symbol, {}).get('history', [])}
+        cache[symbol] = {'price': entry['price'], 'history': entry['history'], 'timestamp': now}
+    save_cache(cache)
+
+    failed, from_stale_cache = [], []
+    for position in portfolio:
+        entry = cache.get(position['symbol'])
+        if entry is None:
+            position['price'] = 0
+            position['history'] = []
+            failed.append(position['symbol'])
+        else:
+            position['price'] = entry['price']
+            position['history'] = entry.get('history', [])
+            if now - entry.get('timestamp', 0) >= CACHE_TTL_SECONDS:
+                from_stale_cache.append(position['symbol'])
+        position['market_value'] = position['shares'] * position['price']
+        position['total_cost'] = position['shares'] * position['avg_cost']
+        position['profit_loss'] = position['market_value'] - position['total_cost']
+        position['inc_percent'] = (position['profit_loss'] / position['total_cost'] * 100) if position['total_cost'] > 0 else 0
+    return failed, from_stale_cache
 
 def main():
     st.markdown('<h1 style="color: #1f77b4; font-size: 1.4rem; font-weight: bold; margin: 0;">📈 Smart Portfolio</h1>', unsafe_allow_html=True)
@@ -237,59 +215,13 @@ def main():
     usd_to_cny = exchange_rates['usd_to_cny']
     hkd_to_usd = exchange_rates['hkd_to_usd']
     
-    api_key = "8f411860976c4166a4dc51dafb992dd8"  # Your original API key - may need renewal
+    failed_symbols, cached_symbols = populate_market_data(portfolio, force=st.session_state.pop("force_update", False))
+    stocks_usd = sum(p['market_value'] for p in portfolio)
     
-    # Fetch real-time prices for all stocks with rate limiting
-    stocks_usd = 0
-    failed_symbols = []
-    
-    # Load cached prices from previous run
-    try:
-        with open('stock_cache.json', 'r') as f:
-            cache = json.load(f)
-    except:
-        cache = {}
-    
-    current_time = time.time()
-    
-    for position in portfolio:
-        symbol = position['symbol']
-        
-        # Use cached price if available and less than 1 hour old
-        if symbol in cache and current_time - cache[symbol]['timestamp'] < 3600:
-            position['price'] = cache[symbol]['price']
-        else:
-            # Try to fetch new price
-            price = get_stock_price(symbol, api_key)
-            if price and price > 0:
-                position['price'] = price
-                cache[symbol] = {'price': price, 'timestamp': current_time}
-            else:
-                # Use cached price as fallback
-                if symbol in cache:
-                    position['price'] = cache[symbol]['price']
-                    st.warning(f"⚠️ Using cached price for {symbol}")
-                else:
-                    position['price'] = 0
-                    failed_symbols.append(symbol)
-        
-        # Calculate values
-        shares = position['shares']
-        avg_cost = position['avg_cost']
-        position['market_value'] = shares * position['price']
-        position['total_cost'] = shares * avg_cost
-        position['profit_loss'] = position['market_value'] - position['total_cost']
-        position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
-        
-        stocks_usd += position['market_value']
-    
-    # Save updated cache
-    with open('stock_cache.json', 'w') as f:
-        json.dump(cache, f)
-    
+    if cached_symbols:
+        st.warning(f"⚠️ Using cached prices for: {', '.join(cached_symbols)}")
     if failed_symbols:
         st.error(f"❌ No price data for: {', '.join(failed_symbols)}")
-        st.info("API limit may be reached. Consider upgrading API key or reducing update frequency")
     
     # Sidebar with editing functions (compact)
     with st.sidebar:
@@ -344,8 +276,9 @@ def main():
             if new_symbol and new_shares > 0 and new_cost > 0:
                 existing = next((p for p in portfolio if p['symbol'] == new_symbol), None)
                 if existing:
-                    existing['shares'] += new_shares
-                    existing['avg_cost'] = (existing['avg_cost'] * existing['shares'] + new_cost * new_shares) / (existing['shares'] + new_shares)
+                    total_shares = existing['shares'] + new_shares
+                    existing['avg_cost'] = (existing['avg_cost'] * existing['shares'] + new_cost * new_shares) / total_shares
+                    existing['shares'] = total_shares
                     save_portfolio(portfolio)
                     st.success(f"Updated {new_symbol}")
                 else:
@@ -369,51 +302,12 @@ def main():
     col1, col2 = st.columns([1, 4])
     with col1:
         if st.button("🔄 Force Update All"):
-            st.info("Force updating all prices...")
-            updated_count = 0
-            for position in portfolio:
-                symbol = position['symbol']
-                price = get_stock_price(symbol, api_key)
-                if price:
-                    position['price'] = price
-                    position['last_updated'] = filetime.time()
-                    updated_count += 1
-                else:
-                    st.warning(f"Failed to fetch price for {symbol}")
-                time.sleep(0.2)
-            
-            if updated_count > 0:
-                for position in portfolio:
-                    position['market_value'] = position['shares'] * position['price']
-                    position['total_cost'] = position['shares'] * position['avg_cost']
-                    position['profit_loss'] = position['market_value'] - position['total_cost']
-                    position['inc_percent'] = (position['profit_loss'] / position['total_cost']) * 100 if position['total_cost'] > 0 else 0
-                
-                save_portfolio(portfolio)
-                st.success(f"Updated {updated_count} prices!")
-                st.rerun()
-            else:
-                st.warning("No prices updated")
+            st.session_state["force_update"] = True
+            st.rerun()
     
     with col2:
-        # Combined status message
-        now = datetime.now()
-        hour = now.hour
-        weekday = now.weekday()
-        
-        if weekday >= 0 and weekday <= 4:
-            if 21 <= hour or hour < 4:
-                market_status = "🌞 Regular Hours"
-            elif 4 <= hour < 9:
-                market_status = "🌙 Pre-Market"
-            elif 16 <= hour < 21:
-                market_status = "🌙 After-Hours"
-            else:
-                market_status = "🌙 24H Trading"
-        else:
-            market_status = "🌙 24H Trading"
-        
-        status_text = f"✅ All prices current | 🌐 {market_status}"
+        priced = len(portfolio) - len(failed_symbols)
+        status_text = f"📊 {priced}/{len(portfolio)} priced | 🌐 {get_market_status()} | 🕒 {datetime.now(ZoneInfo('America/New_York')):%H:%M ET}"
         st.info(status_text)
     
     stocks_cost = sum(p['total_cost'] for p in portfolio)
@@ -432,7 +326,7 @@ def main():
     total_value = total_stocks_value + total_cash_usd
     
     # Sort by market value percentage (largest first)
-    portfolio_sorted = sorted(portfolio, key=lambda x: x['market_value'] / total_value, reverse=True)
+    portfolio_sorted = sorted(portfolio, key=lambda x: x['market_value'], reverse=True)
     
     portfolio_data = []
     
@@ -441,10 +335,10 @@ def main():
         current_price = position['price']
         value_percent = (position['market_value'] / total_value * 100) if total_value > 0 else 0
         
-        # Skip percentile calculation for now to speed up startup
-        p5d = None
-        p30d = None
-        p3m = None
+        history = position.get('history', [])
+        p5d = calculate_percentile(current_price, history, '5d')
+        p30d = calculate_percentile(current_price, history, '1m')
+        p3m = calculate_percentile(current_price, history, '3m')
         
         # Color coding for percentiles
         def color_pct(pct_val):
@@ -500,7 +394,12 @@ def main():
     # Final totals - compact single row
     cash_pct = (total_cash_usd / grand_total_usd * 100) if grand_total_usd > 0 else 0
     stocks_pct = (stocks_usd / grand_total_usd * 100) if grand_total_usd > 0 else 0
-    totals_text = f"💰 Total: ${grand_total_usd:,.0f} USD (¥{grand_total_cny:,.0f} CNY) | 📊 Stocks: {stocks_pct:.0f}% Cash: {cash_pct:.0f}%"
+    stocks_return_pct = (stocks_profit / stocks_cost * 100) if stocks_cost > 0 else 0
+    totals_text = (
+        f"💰 Total: ${grand_total_usd:,.0f} USD (¥{grand_total_cny:,.0f} CNY) | "
+        f"📊 Stocks: {stocks_pct:.0f}% Cash: {cash_pct:.0f}% | "
+        f"📈 Unrealized P/L: ${stocks_profit:,.0f} ({stocks_return_pct:+.1f}%)"
+    )
     st.info(totals_text)
 
 if __name__ == "__main__":
