@@ -4,12 +4,11 @@ A personal portfolio tracking web application with real-time stock analysis, pri
 
 ## Features
 
-- **Real-time Stock Data**: Fetches current stock prices using Yahoo Finance API
-- **Percentile Analysis**: Shows current price percentiles for different time periods:
-  - Intraday (1D)
-  - Past 5 days
-  - Past 1 month
-  - Past 3 months
+- **Real-time Stock Data**: Fetches current prices and 3 months of history for the whole portfolio in a single batched Yahoo Finance request (typically under a second)
+- **Percentile Analysis**: Shows where the current price ranks within the actual closing prices of:
+  - Past 5 trading days
+  - Past month (21 trading days)
+  - Past 3 months (63 trading days)
 - **Price Alerts**: Automatic alerts for:
   - 5% price movements (up/down)
   - Volume spikes (2x average volume)
@@ -44,7 +43,7 @@ A personal portfolio tracking web application with real-time stock analysis, pri
 
 2. **Navigate to the project directory**:
    ```bash
-   cd /Users/mac/Desktop/smart-portfolio
+   cd smart-portfolio
    ```
 
 3. **Install required packages**:
@@ -54,8 +53,17 @@ A personal portfolio tracking web application with real-time stock analysis, pri
 
    Or install individually:
    ```bash
-   pip3 install streamlit yfinance pandas numpy requests plotly
+   pip3 install streamlit yfinance pandas numpy requests
    ```
+
+### Optional: Twelve Data fallback
+
+If Yahoo Finance has no data for a symbol, the app can try Twelve Data. Set your key
+before starting the app; without it the symbol is simply reported as unavailable:
+
+```bash
+export TWELVE_DATA_API_KEY=your_key_here
+```
 
 ### Running the Application
 
@@ -109,12 +117,12 @@ The system automatically displays alerts when:
 
 ### Understanding Percentile Analysis
 
-The percentile columns show where the current price falls within the historical range:
+The percentile columns show where the current price falls within the closing prices of the period:
 - **0%**: Price is at the lowest point in the period
 - **50%**: Price is at the median
 - **100%**: Price is at the highest point in the period
 
-For example, if "1D %ile" shows "75%", the current price is higher than 75% of prices in the last day.
+For example, if "5D %" shows 75%, the current price is higher than 75% of the closes of the last 5 trading days.
 
 ## Total Portfolio Calculation
 
@@ -132,19 +140,20 @@ The grand total portfolio includes:
 
 ## Understanding Percentile Analysis
 
-The percentile columns show where the current price falls within the historical range:
+The percentile columns show where the current price falls within the closing prices of the period:
 - **0%**: Price is at the lowest point in the period
 - **50%**: Price is at the median
 - **100%**: Price is at the highest point in the period
 
-For example, if "1D %ile" shows "75%", the current price is higher than 75% of prices in the last day.
+For example, if "5D %" shows 75%, the current price is higher than 75% of the closes of the last 5 trading days.
 
 ## File Structure
 
 ```
 smart-portfolio/
 ├── app.py              # Main Streamlit application
-├── portfolio.json      # Stock portfolio data storage
+├── portfolio.json      # Stock portfolio data storage (symbol, shares, avg cost only)
+├── stock_cache.json    # Local price/history cache, 1 hour TTL (git-ignored)
 ├── client_cash.json    # Client cash holdings data (USD & HKD)
 ├── requirements.txt    # Python dependencies
 └── README.md          # This file
