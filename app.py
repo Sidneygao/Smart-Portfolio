@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import base64
 import json
 import os
 import requests
@@ -56,12 +57,80 @@ CACHE_TTL_SECONDS = 3600
 TWELVE_DATA_API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "")
 PERIOD_TRADING_DAYS = {"5d": 5, "1m": 21, "3m": 63}
 
-def load_portfolio():
+# Optional GitHub-backed storage: hosts like Render have an ephemeral filesystem,
+# so local writes are lost on restart. With a token set, the JSON files live in the repo.
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "Sidneygao/Smart-Portfolio")
+GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
+GITHUB_API = "https://api.github.com"
+
+def _github_headers():
+    return {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+
+def _github_get_json(remote_path):
+    """Return (data, sha) for a JSON file in the repo, or (None, None)."""
     try:
-        with open(PORTFOLIO_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
+        url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{remote_path}"
+        response = requests.get(url, headers=_github_headers(), params={"ref": GITHUB_BRANCH}, timeout=10)
+        if response.status_code != 200:
+            return None, None
+        payload = response.json()
+        return json.loads(base64.b64decode(payload["content"]).decode()), payload["sha"]
+    except (requests.RequestException, ValueError, KeyError):
+        return None, None
+
+def _github_put_json(remote_path, data, message):
+    """Commit the JSON file to the repo. Returns an error string, or None on success."""
+    _, sha = _github_get_json(remote_path)
+    body = {
+        "message": message,
+        "content": base64.b64encode(json.dumps(data, indent=2).encode()).decode(),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{remote_path}"
+        response = requests.put(url, headers=_github_headers(), json=body, timeout=15)
+        if response.status_code in (200, 201):
+            return None
+        return f"GitHub {response.status_code}: {response.json().get('message', response.text[:120])}"
+    except requests.RequestException as exc:
+        return str(exc)
+
+def _load_data(remote_path, local_path, default):
+    """Read from GitHub when a token is configured, else from the local file. Cached per session."""
+    key = f"data::{remote_path}"
+    if key in st.session_state:
+        return st.session_state[key]
+    data = None
+    if GITHUB_TOKEN:
+        data, _ = _github_get_json(remote_path)
+    if data is None:
+        try:
+            with open(local_path, 'r') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = default
+    st.session_state[key] = data
+    return data
+
+def _save_data(remote_path, local_path, data, message):
+    st.session_state[f"data::{remote_path}"] = data
+    try:
+        with open(local_path, 'w') as f:
+            json.dump(data, f, indent=2)
+    except OSError:
+        pass
+    if GITHUB_TOKEN:
+        error = _github_put_json(remote_path, data, message)
+        if error:
+            st.error(f"❌ Not saved to GitHub — {error}")
+        return error is None
+    return True
+
+def load_portfolio():
+    return _load_data("portfolio.json", PORTFOLIO_FILE, [])
 
 def save_portfolio(portfolio):
     """Persist only the essential fields; prices and derived values are always re-fetched."""
@@ -75,19 +144,14 @@ def save_portfolio(portfolio):
         }
         for p in portfolio
     ]
-    with open(PORTFOLIO_FILE, 'w') as f:
-        json.dump(essentials, f, indent=2)
+    return _save_data("portfolio.json", PORTFOLIO_FILE, essentials, "Update portfolio from Smart Portfolio app")
 
 def load_client_cash():
-    try:
-        with open(CASH_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {"azhu": {"name": "AZHU", "usd": 0, "hkd": 0}, "aniu": {"name": "ANIU", "usd": 0, "hkd": 0}}
+    default = {"azhu": {"name": "AZHU", "usd": 0, "hkd": 0}, "aniu": {"name": "ANIU", "usd": 0, "hkd": 0}}
+    return _load_data("client_cash.json", CASH_FILE, default)
 
 def save_client_cash(cash_data):
-    with open(CASH_FILE, 'w') as f:
-        json.dump(cash_data, f, indent=2)
+    return _save_data("client_cash.json", CASH_FILE, cash_data, "Update cash holdings from Smart Portfolio app")
 
 def get_exchange_rates():
     try:
@@ -311,11 +375,14 @@ def main():
     with col1:
         if st.button("🔄 Force Update All"):
             st.session_state["force_update"] = True
+            for key in [k for k in st.session_state if k.startswith("data::")]:
+                del st.session_state[key]
             st.rerun()
     
     with col2:
         priced = len(portfolio) - len(failed_symbols)
-        status_text = f"📊 {priced}/{len(portfolio)} priced | 🌐 {get_market_status()} | 🕒 {datetime.now(ZoneInfo('America/New_York')):%H:%M ET}"
+        storage = "☁️ GitHub" if GITHUB_TOKEN else "💾 Local file"
+        status_text = f"📊 {priced}/{len(portfolio)} priced | 🌐 {get_market_status()} | 🕒 {datetime.now(ZoneInfo('America/New_York')):%H:%M ET} | {storage}"
         st.info(status_text)
     
     stocks_cost = sum(p['total_cost'] for p in portfolio)
