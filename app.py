@@ -82,6 +82,12 @@ def _github_get_json(remote_path):
 def _github_put_json(remote_path, data, message):
     """Commit the JSON file to the repo. Returns an error string, or None on success."""
     _, sha = _github_get_json(remote_path)
+    if sha is None:
+        return (
+            f"cannot read {remote_path} on branch '{GITHUB_BRANCH}' of {GITHUB_REPO} "
+            "— check GITHUB_BRANCH (branch names are case-sensitive) and that the token "
+            "has Contents: Read and write on this repository"
+        )
     body = {
         "message": message,
         "content": base64.b64encode(json.dumps(data, indent=2).encode()).decode(),
@@ -124,9 +130,13 @@ def _save_data(remote_path, local_path, data, message):
         pass
     if GITHUB_TOKEN:
         error = _github_put_json(remote_path, data, message)
-        if error:
-            st.error(f"❌ Not saved to GitHub — {error}")
+        # Kept in session state because the caller reruns immediately, which would wipe a plain st.error.
+        st.session_state["last_save"] = (
+            f"❌ {remote_path} not saved to GitHub — {error}" if error
+            else f"✅ {remote_path} committed to {GITHUB_REPO}@{GITHUB_BRANCH}"
+        )
         return error is None
+    st.session_state["last_save"] = f"💾 {remote_path} saved locally (no GITHUB_TOKEN set)"
     return True
 
 def load_portfolio():
@@ -297,6 +307,23 @@ def main():
     
     # Sidebar with editing functions (compact)
     with st.sidebar:
+        if "last_save" in st.session_state:
+            message = st.session_state["last_save"]
+            (st.error if message.startswith("❌") else st.success)(message)
+        with st.expander("Storage", expanded=False):
+            if GITHUB_TOKEN:
+                st.caption(f"☁️ GitHub · {GITHUB_REPO} @ {GITHUB_BRANCH}")
+                if st.button("Test GitHub access"):
+                    error = _github_put_json(
+                        "portfolio.json", load_portfolio(), "Connectivity check from Smart Portfolio app"
+                    )
+                    if error:
+                        st.error(error)
+                    else:
+                        st.success("Write access OK")
+            else:
+                st.caption("💾 Local file — set GITHUB_TOKEN to persist across restarts")
+
         st.header("Edit Stock")
         selected_symbol = st.selectbox("Symbol", [p['symbol'] for p in portfolio])
         
