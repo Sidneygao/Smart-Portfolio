@@ -56,6 +56,25 @@ A personal portfolio tracking web application with real-time stock analysis, pri
    pip3 install streamlit yfinance pandas numpy requests
    ```
 
+### Persistent storage when deployed (Render, etc.)
+
+Hosted containers have an ephemeral filesystem: edits written to `portfolio.json` /
+`client_cash.json` are lost when the instance restarts or redeploys. Set a GitHub token
+and the app reads and writes those two files in the repository instead, so edits survive:
+
+```bash
+export GITHUB_TOKEN=ghp_your_fine_grained_token   # needs Contents: read & write on this repo
+export GITHUB_REPO=Sidneygao/Smart-Portfolio      # optional, this is the default
+export GITHUB_BRANCH=portfolio-data               # optional, defaults to main
+```
+
+Each save becomes a commit, so the data is versioned and can be rolled back. If the host
+auto-deploys on pushes to `main`, point `GITHUB_BRANCH` at a separate data branch
+(e.g. `portfolio-data`) so saving your holdings doesn't trigger a redeploy.
+
+Without `GITHUB_TOKEN` the app just reads and writes the local files as before. The status
+bar shows which mode is active (`☁️ GitHub` or `💾 Local file`).
+
 ### Optional: Twelve Data fallback
 
 If Yahoo Finance has no data for a symbol, the app can try Twelve Data. Set your key
