@@ -6,6 +6,7 @@ import os
 import requests
 import time
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -161,8 +162,21 @@ def get_exchange_rates():
     except:
         return {'usd_to_cny': 7.2, 'usd_to_hkd': 7.8, 'hkd_to_usd': 0.128}
 
+def get_live_price(symbol):
+    """Latest regular-market price from Yahoo's quote metadata, or None."""
+    try:
+        price = yf.Ticker(symbol).fast_info["lastPrice"]
+    except Exception:
+        return None
+    return float(price) if price and price == price and price > 0 else None
+
 def get_market_data(symbols):
-    """Fetch latest prices and 3-month close history for all symbols in one batched request."""
+    """Fetch latest prices and 3-month close history for all symbols.
+
+    Yahoo's daily bars often leave the current session's Close empty, so the last
+    non-empty close can be a day old. The price therefore comes from the live quote,
+    which is also appended to the history when today's bar has no close yet.
+    """
     data = {}
     if not symbols:
         return data
@@ -172,16 +186,26 @@ def get_market_data(symbols):
     except Exception:
         raw = None
 
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        live_prices = dict(zip(symbols, executor.map(get_live_price, symbols)))
+
     for symbol in symbols:
-        closes = []
+        close_series = None
         try:
-            if raw is not None and len(symbols) > 1:
-                closes = raw[symbol]["Close"].dropna().tolist()
-            elif raw is not None:
-                closes = raw["Close"].dropna().tolist()
+            if raw is not None:
+                frame = raw[symbol] if isinstance(raw.columns, pd.MultiIndex) else raw
+                close_series = frame["Close"]
         except (KeyError, TypeError):
-            closes = []
-        if closes:
+            close_series = None
+        closes = close_series.dropna().tolist() if close_series is not None else []
+        live = live_prices.get(symbol)
+        if live is not None:
+            if close_series is not None and len(close_series) and pd.isna(close_series.iloc[-1]):
+                closes.append(live)
+            elif not closes:
+                closes = [live]
+            data[symbol] = {"price": live, "history": closes}
+        elif closes:
             data[symbol] = {"price": closes[-1], "history": closes}
     return data
 
