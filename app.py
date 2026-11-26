@@ -397,12 +397,14 @@ def main():
         confirm_remove = st.checkbox("Confirm removal", key="remove_confirm")
         
         if st.button("Remove Stock", key="remove_stock_button", disabled=not (remove_symbol and confirm_remove)):
-            portfolio[:] = [p for p in portfolio if p['symbol'] != remove_symbol]
-            save_portfolio(portfolio)
-            st.session_state.pop("remove_symbol", None)
-            st.session_state.pop("remove_confirm", None)
-            st.success(f"Removed {remove_symbol}")
-            st.rerun()
+            remaining = [p for p in portfolio if p['symbol'] != remove_symbol]
+            if save_portfolio(remaining):
+                st.session_state.pop("remove_symbol", None)
+                st.session_state.pop("remove_confirm", None)
+                st.success(f"Removed {remove_symbol}")
+                st.rerun()
+            else:
+                st.session_state.pop("data::portfolio.json", None)
     
     if not portfolio:
         st.info("No positions. Add first position in sidebar.")
