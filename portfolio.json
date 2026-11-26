@@ -138,5 +138,12 @@
     "avg_cost": 298.0,
     "currency": "USD",
     "fx": 1
+  },
+  {
+    "symbol": "NVDA",
+    "shares": 40.0,
+    "avg_cost": 145.0,
+    "currency": "USD",
+    "fx": 1
   }
 ]
