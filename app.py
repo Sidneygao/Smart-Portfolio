@@ -389,6 +389,20 @@ def main():
                     save_portfolio(portfolio)
                     st.success(f"Added {new_symbol}")
                 st.rerun()
+        
+        st.divider()
+        
+        st.header("Remove Stock")
+        remove_symbol = st.selectbox("Symbol", [p['symbol'] for p in portfolio], index=None, placeholder="Choose symbol", key="remove_symbol")
+        confirm_remove = st.checkbox("Confirm removal", key="remove_confirm")
+        
+        if st.button("Remove Stock", key="remove_stock_button", disabled=not (remove_symbol and confirm_remove)):
+            portfolio[:] = [p for p in portfolio if p['symbol'] != remove_symbol]
+            save_portfolio(portfolio)
+            st.session_state.pop("remove_symbol", None)
+            st.session_state.pop("remove_confirm", None)
+            st.success(f"Removed {remove_symbol}")
+            st.rerun()
     
     if not portfolio:
         st.info("No positions. Add first position in sidebar.")
