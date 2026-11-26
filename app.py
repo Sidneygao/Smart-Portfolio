@@ -393,14 +393,14 @@ def main():
         st.divider()
         
         st.header("Remove Stock")
-        remove_symbol = st.selectbox("Symbol", [p['symbol'] for p in portfolio], index=None, placeholder="Choose symbol", key="remove_symbol")
-        confirm_remove = st.checkbox("Confirm removal", key="remove_confirm")
+        remove_nonce = st.session_state.get("remove_nonce", 0)
+        remove_symbol = st.selectbox("Symbol", [p['symbol'] for p in portfolio], index=None, placeholder="Choose symbol", key=f"remove_symbol_{remove_nonce}")
+        confirm_remove = st.checkbox("Confirm removal", key=f"remove_confirm_{remove_nonce}")
         
         if st.button("Remove Stock", key="remove_stock_button", disabled=not (remove_symbol and confirm_remove)):
             remaining = [p for p in portfolio if p['symbol'] != remove_symbol]
             if save_portfolio(remaining):
-                st.session_state.pop("remove_symbol", None)
-                st.session_state.pop("remove_confirm", None)
+                st.session_state["remove_nonce"] = remove_nonce + 1
                 st.success(f"Removed {remove_symbol}")
                 st.rerun()
             else:
