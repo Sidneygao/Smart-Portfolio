@@ -119,13 +119,6 @@
     "fx": 1
   },
   {
-    "symbol": "SNPS",
-    "shares": 0.01,
-    "avg_cost": 436.0,
-    "currency": "USD",
-    "fx": 1
-  },
-  {
     "symbol": "BABA",
     "shares": 40.0,
     "avg_cost": 189.0,
