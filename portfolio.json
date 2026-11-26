@@ -131,5 +131,12 @@
     "avg_cost": 26.0,
     "currency": "USD",
     "fx": 1
+  },
+  {
+    "symbol": "AMAT",
+    "shares": 20.0,
+    "avg_cost": 298.0,
+    "currency": "USD",
+    "fx": 1
   }
 ]
